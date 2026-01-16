@@ -6,9 +6,9 @@ import asyncio
 import threading
 import atexit
 from typing import Optional
+import base64
 from dotenv import load_dotenv
-from mcp.server.fastmcp import FastMCP, Context
-from mcp.types import ImageContent
+from mcp.server.fastmcp import FastMCP, Context, Image
 from tview_scraper import TradingViewScraper, TradingViewScraperError
 
 
@@ -315,15 +315,15 @@ else:
 mcp_server = FastMCP("TradingView Chart Image - Optimized")
 
 
-def _parse_image_data(image_url: str) -> tuple[str, str]:
+def _parse_image_data(image_url: str) -> tuple[bytes, str]:
     """
-    Parse a data URL or image URL and return (base64_data, mime_type).
+    Parse a data URL and return (image_bytes, format).
 
     Args:
-        image_url: Either a data URL (data:image/png;base64,...) or an S3 URL
+        image_url: A data URL (data:image/png;base64,...)
 
     Returns:
-        Tuple of (base64_data, mime_type)
+        Tuple of (image_bytes, format) where format is like "png", "jpeg", etc.
     """
     if image_url.startswith("data:"):
         # Parse data URL: data:image/png;base64,<data>
@@ -331,14 +331,18 @@ def _parse_image_data(image_url: str) -> tuple[str, str]:
         header, base64_data = image_url.split(",", 1)
         # Extract mime type from header (e.g., "data:image/png;base64")
         mime_type = header.split(":")[1].split(";")[0]
-        return base64_data, mime_type
+        # Extract format from mime type (e.g., "image/png" -> "png")
+        image_format = mime_type.split("/")[1] if "/" in mime_type else "png"
+        # Decode base64 to bytes
+        image_bytes = base64.b64decode(base64_data)
+        return image_bytes, image_format
     else:
         # For S3 URLs, we would need to fetch the image - for now raise an error
         raise ValueError(f"Expected data URL but got: {image_url[:100]}")
 
 
 @mcp_server.tool()
-async def get_tradingview_chart_image(ticker: str, interval: str, ctx: Context) -> ImageContent:
+async def get_tradingview_chart_image(ticker: str, interval: str, ctx: Context) -> Image:
     """
     Fetches a TradingView chart snapshot and returns it as an image.
 
@@ -351,7 +355,7 @@ async def get_tradingview_chart_image(ticker: str, interval: str, ctx: Context) 
         ctx: MCP Context (automatically passed by FastMCP).
 
     Returns:
-        ImageContent: The chart image that can be directly displayed and analyzed.
+        Image: The chart image that can be directly displayed and analyzed.
 
     Raises:
         Error: If the scraper fails or invalid input is provided.
@@ -400,18 +404,14 @@ async def get_tradingview_chart_image(ticker: str, interval: str, ctx: Context) 
         if not image_url:
             raise TradingViewScraperError("Scraper did not return an image URL.")
 
-        # Parse the data URL and create ImageContent
-        base64_data, mime_type = _parse_image_data(image_url)
+        # Parse the data URL and create Image
+        image_bytes, image_format = _parse_image_data(image_url)
 
         await ctx.info(
-            f"✅ Successfully obtained chart image for {ticker} ({interval}), mime_type={mime_type}, data_length={len(base64_data)}"
+            f"✅ Successfully obtained chart image for {ticker} ({interval}), format={image_format}, size={len(image_bytes)} bytes"
         )
 
-        return ImageContent(
-            type="image",
-            data=base64_data,
-            mimeType=mime_type,
-        )
+        return Image(data=image_bytes, format=image_format)
 
     except TradingViewScraperError as e:
         await ctx.error(f"❌ Scraper Error: {e}")
