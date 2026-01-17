@@ -351,7 +351,7 @@ The following environment variables can be set to configure the scraper:
 - `MCP_SCRAPER_WINDOW_WIDTH`: Browser window width (default: `1400`)
 - `MCP_SCRAPER_WINDOW_HEIGHT`: Browser window height (default: `1400`)
 - `MCP_SCRAPER_USE_SAVE_SHORTCUT`: Use clipboard image capture instead of screenshot links (default: `True`)
-- `MCP_SCRAPER_CHART_PAGE_ID`: Custom chart page ID (optional)
+- `MCP_SCRAPER_CHART_PAGE_ID`: Your TradingView chart layout ID (**required** - see [Chart Layout Setup](#chart-layout-setup))
 
 ### Save Shortcut Feature
 
@@ -378,3 +378,60 @@ MCP_SCRAPER_USE_SAVE_SHORTCUT=True
 # Disable and use traditional screenshot links
 MCP_SCRAPER_USE_SAVE_SHORTCUT=False
 ```
+
+### Chart Layout Setup
+
+The `MCP_SCRAPER_CHART_PAGE_ID` is **required** and must be set to your own TradingView chart layout ID. This ensures you have full control over the chart appearance and indicators.
+
+#### Step 1: Create a Chart Layout on TradingView
+
+1. Go to [TradingView](https://www.tradingview.com/chart/)
+2. Configure your chart with your preferred settings:
+   - **Chart type**: Candlesticks (recommended for technical analysis)
+   - **Indicators**: Add any indicators you want (e.g., VWAP, Volume)
+   - **Theme**: Dark or light background
+   - **Volume pane**: Resize to your preference (25-30% recommended)
+
+#### Step 2: Save Your Layout
+
+1. Click the **Layout dropdown** (top-left corner)
+2. Click **Save layout as...** or **Rename**
+3. Give it a descriptive name (e.g., "Trading Analysis")
+
+#### Step 3: Get Your Chart Page ID
+
+Look at the URL in your browser after saving:
+
+```
+https://www.tradingview.com/chart/AbCdEfGh/?symbol=...
+                                 ^^^^^^^^
+                                 This is your Chart Page ID
+```
+
+Copy the 8-character ID (e.g., `AbCdEfGh`).
+
+#### Step 4: Configure the Environment Variable
+
+Add to your `.env` file or MCP client config:
+
+```bash
+MCP_SCRAPER_CHART_PAGE_ID=AbCdEfGh
+```
+
+#### Recommended Layout for AI Analysis
+
+For optimal AI chart analysis (e.g., Wyckoff method), consider:
+
+| Component | Recommendation | Why |
+|-----------|----------------|-----|
+| **Chart type** | Standard Candlesticks | True wicks visible for pattern recognition |
+| **Volume** | 25-30% of chart height | Essential for volume analysis |
+| **VWAP** | Single line (optional) | Institutional reference point |
+| **Background** | High contrast (dark/light) | Better AI readability |
+| **Grid** | Disabled or minimal | Reduces visual noise |
+
+**Avoid:**
+- Too many overlapping indicators
+- Heikin-Ashi candles (hide true price action)
+- Small volume pane
+- Busy color schemes

@@ -70,7 +70,6 @@ class TradingViewScraper:
     # --- Constants ---
     TRADINGVIEW_BASE_URL = "https://www.tradingview.com"
     TRADINGVIEW_CHART_BASE_URL = "https://in.tradingview.com/chart/"
-    DEFAULT_CHART_PAGE_ID = "XHDbt5Yy"
     SESSION_ID_COOKIE = "sessionid"
     SESSION_ID_SIGN_COOKIE = "sessionid_sign"
     SESSION_ID_ENV_VAR = "TRADINGVIEW_SESSION_ID"
@@ -114,14 +113,31 @@ class TradingViewScraper:
 
     def __init__(
         self,
+        chart_page_id: str,
         default_ticker: str = "BYBIT:BTCUSDT.P",
         default_interval: str = "15",
         headless: bool = True,
         window_size: str = DEFAULT_WINDOW_SIZE,
-        chart_page_id: str = DEFAULT_CHART_PAGE_ID,
         use_save_shortcut: bool = True,
     ):
-        """Initializes the scraper configuration."""
+        """Initializes the scraper configuration.
+
+        Args:
+            chart_page_id: Required. Your TradingView chart layout ID (e.g., "ZAU4hxoV").
+                          Get this from your chart URL: https://www.tradingview.com/chart/{ID}/
+            default_ticker: Default ticker symbol for charts.
+            default_interval: Default time interval.
+            headless: Run browser in headless mode.
+            window_size: Browser window dimensions.
+            use_save_shortcut: Use clipboard-based image capture.
+        """
+        if not chart_page_id:
+            raise ValueError(
+                "chart_page_id is required. Set MCP_SCRAPER_CHART_PAGE_ID environment variable "
+                "with your TradingView chart layout ID. "
+                "To get your chart ID: 1) Create a chart layout on TradingView, "
+                "2) Copy the ID from the URL (e.g., https://www.tradingview.com/chart/ZAU4hxoV/)"
+            )
         # Group configuration settings
         self.config = {
             "headless": headless,

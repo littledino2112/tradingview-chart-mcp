@@ -151,10 +151,9 @@ class OptimizedTradingViewMCPServer:
             try:
                 self.logger.info(f"   Creating browser {i+1}/{self.max_concurrent}...")
                 scraper = TradingViewScraper(
+                    chart_page_id=self.config["chart_page_id"],
                     headless=self.config.get("headless", True),
                     window_size=f"{self.config.get('window_width', 1400)},{self.config.get('window_height', 1400)}",
-                    chart_page_id=self.config.get("chart_page_id")
-                    or TradingViewScraper.DEFAULT_CHART_PAGE_ID,
                     use_save_shortcut=self.config.get("use_save_shortcut", True),
                 )
                 scraper._setup_driver()  # Initialize browser immediately
@@ -349,8 +348,15 @@ TRADINGVIEW_SESSION_ID, TRADINGVIEW_SESSION_ID_SIGN = validate_environment(args.
 
 # Get scraper configuration
 config = get_scraper_config()
-if config["chart_page_id"] == "":
-    config["chart_page_id"] = TradingViewScraper.DEFAULT_CHART_PAGE_ID
+if not config["chart_page_id"]:
+    logger.error(
+        "❌ MCP_SCRAPER_CHART_PAGE_ID is required but not set.\n"
+        "   To configure:\n"
+        "   1. Create a chart layout on TradingView (https://www.tradingview.com/chart/)\n"
+        "   2. Copy the chart ID from the URL (e.g., https://www.tradingview.com/chart/ZAU4hxoV/)\n"
+        "   3. Set MCP_SCRAPER_CHART_PAGE_ID=ZAU4hxoV in your environment or .mcp.json"
+    )
+    sys.exit(1)
 
 # Initialize optimized chart server (unless pooling is disabled)
 if not args.disable_pooling:

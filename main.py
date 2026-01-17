@@ -99,11 +99,16 @@ HEADLESS = config["headless"]
 WINDOW_WIDTH = config["window_width"]
 WINDOW_HEIGHT = config["window_height"]
 USE_SAVE_SHORTCUT = config["use_save_shortcut"]
-CHART_PAGE_ID = (
-    config["chart_page_id"]
-    if config["chart_page_id"]
-    else TradingViewScraper.DEFAULT_CHART_PAGE_ID
-)
+CHART_PAGE_ID = config["chart_page_id"]
+if not CHART_PAGE_ID:
+    logger.error(
+        "❌ MCP_SCRAPER_CHART_PAGE_ID is required but not set.\n"
+        "   To configure:\n"
+        "   1. Create a chart layout on TradingView (https://www.tradingview.com/chart/)\n"
+        "   2. Copy the chart ID from the URL (e.g., https://www.tradingview.com/chart/ZAU4hxoV/)\n"
+        "   3. Set MCP_SCRAPER_CHART_PAGE_ID=ZAU4hxoV in your environment or .mcp.json"
+    )
+    sys.exit(1)
 WINDOW_SIZE = (WINDOW_WIDTH, WINDOW_HEIGHT)
 
 # Create MCP server
