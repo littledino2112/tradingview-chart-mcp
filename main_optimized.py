@@ -395,7 +395,9 @@ def _parse_image_data(image_url: str) -> tuple[bytes, str]:
 
 
 @mcp_server.tool()
-async def get_tradingview_chart_image(ticker: str, interval: str, ctx: Context) -> Image:
+async def get_tradingview_chart_image(
+    ticker: str, interval: str, ctx: Context, save_path: str = ""
+) -> Image:
     """
     Fetches a TradingView chart snapshot and returns it as an image.
 
@@ -406,6 +408,7 @@ async def get_tradingview_chart_image(ticker: str, interval: str, ctx: Context) 
         ticker: The TradingView ticker symbol (e.g., "BYBIT:BTCUSDT.P", "NASDAQ:AAPL").
         interval: The chart time interval (e.g., '1', '5', '15', '60', '240', 'D', 'W').
         ctx: MCP Context (automatically passed by FastMCP).
+        save_path: Optional file path to save the chart image (e.g., "chart.png").
 
     Returns:
         Image: The chart image that can be directly displayed and analyzed.
@@ -413,8 +416,9 @@ async def get_tradingview_chart_image(ticker: str, interval: str, ctx: Context) 
     Raises:
         Error: If the scraper fails or invalid input is provided.
     """
+    save_msg = f", saving to {save_path}" if save_path else ""
     await ctx.info(
-        f"🔍 [OPTIMIZED] Getting TradingView chart for {ticker} interval {interval}"
+        f"🔍 [OPTIMIZED] Getting TradingView chart for {ticker} interval {interval}{save_msg}"
     )
 
     try:
@@ -459,6 +463,15 @@ async def get_tradingview_chart_image(ticker: str, interval: str, ctx: Context) 
 
         # Parse the data URL and create Image
         image_bytes, image_format = _parse_image_data(image_url)
+
+        # Save to file if path provided
+        if save_path:
+            try:
+                with open(save_path, "wb") as f:
+                    f.write(image_bytes)
+                await ctx.info(f"💾 Chart saved to {save_path}")
+            except Exception as save_err:
+                await ctx.warning(f"⚠️ Failed to save chart to {save_path}: {save_err}")
 
         await ctx.info(
             f"✅ Successfully obtained chart image for {ticker} ({interval}), format={image_format}, size={len(image_bytes)} bytes"
