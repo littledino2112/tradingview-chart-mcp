@@ -1,0 +1,159 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © AI Chart Helper for Wyckoff Analysis
+
+//@version=6
+indicator("Wyckoff AI Helper", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+// Temporal Markers
+show_month_labels = input.bool(true, "Show Month Labels", group="Temporal Markers")
+show_month_lines = input.bool(true, "Show Month Separator Lines", group="Temporal Markers")
+show_week_labels = input.bool(false, "Show Week Numbers (Daily charts)", group="Temporal Markers")
+month_line_color = input.color(color.new(color.gray, 70), "Month Line Color", group="Temporal Markers")
+
+// Volume Analysis
+show_volume_spikes = input.bool(true, "Highlight Volume Spikes", group="Volume")
+volume_spike_mult = input.float(2.0, "Volume Spike Threshold (x avg)", minval=1.5, maxval=5.0, group="Volume")
+volume_avg_period = input.int(20, "Volume Average Period", minval=10, maxval=50, group="Volume")
+bullish_vol_color = input.color(color.new(color.green, 50), "Bullish Volume Spike", group="Volume")
+bearish_vol_color = input.color(color.new(color.red, 50), "Bearish Volume Spike", group="Volume")
+
+// Swing Points (for S/R identification)
+show_swing_points = input.bool(true, "Show Swing High/Low Labels", group="Structure")
+swing_lookback = input.int(5, "Swing Lookback Bars", minval=3, maxval=20, group="Structure")
+
+// ============================================================================
+// MONTH LABELS & SEPARATORS
+// ============================================================================
+is_new_month = month != month[1]
+is_new_week = weekofyear != weekofyear[1]
+
+// Month names for clarity
+get_month_name(m) =>
+    switch m
+        1 => "JAN"
+        2 => "FEB"
+        3 => "MAR"
+        4 => "APR"
+        5 => "MAY"
+        6 => "JUN"
+        7 => "JUL"
+        8 => "AUG"
+        9 => "SEP"
+        10 => "OCT"
+        11 => "NOV"
+        12 => "DEC"
+        => ""
+
+// Draw month labels at top of chart
+if is_new_month and show_month_labels
+    month_text = get_month_name(month) + " " + str.tostring(year)
+    label.new(bar_index, high, month_text,
+              style=label.style_label_down,
+              color=color.new(color.blue, 80),
+              textcolor=color.white,
+              size=size.normal)
+
+// Draw month separator lines
+if is_new_month and show_month_lines
+    line.new(bar_index, low * 0.95, bar_index, high * 1.05,
+             color=month_line_color,
+             style=line.style_dashed,
+             width=1)
+
+// Week numbers (useful for daily charts)
+if is_new_week and show_week_labels and timeframe.isdaily
+    week_text = "W" + str.tostring(weekofyear)
+    label.new(bar_index, low, week_text,
+              style=label.style_label_up,
+              color=color.new(color.gray, 80),
+              textcolor=color.white,
+              size=size.tiny)
+
+// ============================================================================
+// VOLUME SPIKE DETECTION
+// ============================================================================
+vol_sma = ta.sma(volume, volume_avg_period)
+is_volume_spike = volume > vol_sma * volume_spike_mult
+is_bullish_bar = close > open
+is_bearish_bar = close < open
+
+// Background highlight for volume spikes
+bgcolor(show_volume_spikes and is_volume_spike and is_bullish_bar ? bullish_vol_color : na)
+bgcolor(show_volume_spikes and is_volume_spike and is_bearish_bar ? bearish_vol_color : na)
+
+// Label for significant volume spikes (> 3x average)
+is_major_spike = volume > vol_sma * 3
+if show_volume_spikes and is_major_spike
+    vol_ratio = math.round(volume / vol_sma, 1)
+    spike_label = str.tostring(vol_ratio) + "x VOL"
+    label_color = is_bullish_bar ? color.green : color.red
+    label.new(bar_index, is_bullish_bar ? low : high, spike_label,
+              style=is_bullish_bar ? label.style_label_up : label.style_label_down,
+              color=label_color,
+              textcolor=color.white,
+              size=size.small)
+
+// ============================================================================
+// SWING POINTS (Potential Support/Resistance)
+// ============================================================================
+// Swing High: highest high in lookback range
+swing_high = ta.pivothigh(high, swing_lookback, swing_lookback)
+swing_low = ta.pivotlow(low, swing_lookback, swing_lookback)
+
+// Mark swing highs
+if show_swing_points and not na(swing_high)
+    label.new(bar_index - swing_lookback, swing_high, "SH",
+              style=label.style_label_down,
+              color=color.new(color.red, 60),
+              textcolor=color.white,
+              size=size.tiny)
+
+// Mark swing lows
+if show_swing_points and not na(swing_low)
+    label.new(bar_index - swing_lookback, swing_low, "SL",
+              style=label.style_label_up,
+              color=color.new(color.green, 60),
+              textcolor=color.white,
+              size=size.tiny)
+
+// ============================================================================
+// EFFORT VS RESULT INDICATOR (Wyckoff Law #3)
+// ============================================================================
+// Shows when price move is disproportionate to volume (potential exhaustion)
+show_effort_result = input.bool(true, "Show Effort vs Result Warnings", group="Wyckoff")
+
+price_change = math.abs(close - open)
+avg_price_change = ta.sma(price_change, volume_avg_period)
+vol_ratio = volume / vol_sma
+price_ratio = price_change / avg_price_change
+
+// High effort, low result (lots of volume, small move) - potential reversal
+high_effort_low_result = vol_ratio > 1.5 and price_ratio < 0.5
+
+// Low effort, high result (big move on low volume) - weak move
+low_effort_high_result = vol_ratio < 0.5 and price_ratio > 1.5
+
+if show_effort_result and high_effort_low_result
+    label.new(bar_index, high, "⚠️",
+              style=label.style_label_down,
+              color=color.new(color.orange, 50),
+              textcolor=color.white,
+              size=size.tiny,
+              tooltip="High Effort, Low Result - Potential absorption")
+
+// ============================================================================
+// CURRENT DATE WATERMARK
+// ============================================================================
+// Shows current date prominently for reference
+show_date_watermark = input.bool(true, "Show Date Watermark", group="Temporal Markers")
+
+if barstate.islast and show_date_watermark
+    current_date = str.tostring(dayofmonth) + " " + get_month_name(month) + " " + str.tostring(year)
+    label.new(bar_index, close, "📅 " + current_date,
+              style=label.style_label_left,
+              color=color.new(color.blue, 70),
+              textcolor=color.white,
+              size=size.normal)
