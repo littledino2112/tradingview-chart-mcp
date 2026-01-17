@@ -25,10 +25,19 @@ show_swing_points = input.bool(true, "Show Swing High/Low Labels", group="Struct
 swing_lookback = input.int(5, "Swing Lookback Bars", minval=3, maxval=20, group="Structure")
 
 // ============================================================================
-// MONTH LABELS & SEPARATORS
+// MONTH/QUARTER/YEAR LABELS & SEPARATORS (Timeframe Adaptive)
 // ============================================================================
 is_new_month = month != month[1]
+is_new_quarter = (month == 1 or month == 4 or month == 7 or month == 10) and month != month[1]
+is_new_year = year != year[1]
 is_new_week = weekofyear != weekofyear[1]
+
+// Determine what granularity to use based on timeframe
+// Weekly/Monthly charts: show quarters and years
+// Daily charts: show months
+// Intraday: show weeks and months
+is_weekly_or_higher = timeframe.isweekly or timeframe.ismonthly
+is_daily = timeframe.isdaily
 
 // Month names for clarity
 get_month_name(m) =>
@@ -47,24 +56,60 @@ get_month_name(m) =>
         12 => "DEC"
         => ""
 
-// Draw month labels at top of chart
-if is_new_month and show_month_labels
-    month_text = get_month_name(month) + " " + str.tostring(year)
-    label.new(bar_index, high, month_text,
-              style=label.style_label_down,
-              color=color.new(color.blue, 80),
-              textcolor=color.white,
-              size=size.normal)
+get_quarter_name(m) =>
+    switch m
+        1 => "Q1"
+        4 => "Q2"
+        7 => "Q3"
+        10 => "Q4"
+        => ""
 
-// Draw month separator lines
-if is_new_month and show_month_lines
-    line.new(bar_index, low * 0.95, bar_index, high * 1.05,
-             color=month_line_color,
-             style=line.style_dashed,
-             width=1)
+// Draw time labels based on chart timeframe
+if show_month_labels
+    if is_weekly_or_higher
+        // Weekly/Monthly: Show year labels prominently, quarter labels smaller
+        if is_new_year
+            label.new(bar_index, high, str.tostring(year),
+                      style=label.style_label_down,
+                      color=color.new(color.blue, 60),
+                      textcolor=color.white,
+                      size=size.large)
+        else if is_new_quarter and not is_new_year
+            quarter_text = get_quarter_name(month) + " " + str.tostring(year)
+            label.new(bar_index, high, quarter_text,
+                      style=label.style_label_down,
+                      color=color.new(color.blue, 80),
+                      textcolor=color.white,
+                      size=size.small)
+    else
+        // Daily and intraday: Show month labels
+        if is_new_month
+            month_text = get_month_name(month) + " " + str.tostring(year)
+            label.new(bar_index, high, month_text,
+                      style=label.style_label_down,
+                      color=color.new(color.blue, 80),
+                      textcolor=color.white,
+                      size=size.normal)
 
-// Week numbers (useful for daily charts)
-if is_new_week and show_week_labels and timeframe.isdaily
+// Draw separator lines based on chart timeframe
+if show_month_lines
+    if is_weekly_or_higher
+        // Weekly/Monthly: Only year separators
+        if is_new_year
+            line.new(bar_index, low * 0.95, bar_index, high * 1.05,
+                     color=month_line_color,
+                     style=line.style_solid,
+                     width=2)
+    else
+        // Daily and intraday: Month separators
+        if is_new_month
+            line.new(bar_index, low * 0.95, bar_index, high * 1.05,
+                     color=month_line_color,
+                     style=line.style_dashed,
+                     width=1)
+
+// Week numbers (useful for daily charts only)
+if is_new_week and show_week_labels and is_daily
     week_text = "W" + str.tostring(weekofyear)
     label.new(bar_index, low, week_text,
               style=label.style_label_up,
@@ -97,27 +142,33 @@ if show_volume_spikes and is_major_spike
               size=size.small)
 
 // ============================================================================
-// SWING POINTS (Potential Support/Resistance)
+// SWING POINTS (Potential Support/Resistance) - Timeframe Adaptive
 // ============================================================================
+// Use larger lookback for weekly charts to reduce noise
+effective_swing_lookback = is_weekly_or_higher ? swing_lookback * 2 : swing_lookback
+
 // Swing High: highest high in lookback range
-swing_high = ta.pivothigh(high, swing_lookback, swing_lookback)
-swing_low = ta.pivotlow(low, swing_lookback, swing_lookback)
+swing_high = ta.pivothigh(high, effective_swing_lookback, effective_swing_lookback)
+swing_low = ta.pivotlow(low, effective_swing_lookback, effective_swing_lookback)
+
+// Adaptive label size - larger for weekly
+swing_label_size = is_weekly_or_higher ? size.small : size.tiny
 
 // Mark swing highs
 if show_swing_points and not na(swing_high)
-    label.new(bar_index - swing_lookback, swing_high, "SH",
+    label.new(bar_index - effective_swing_lookback, swing_high, "SH",
               style=label.style_label_down,
               color=color.new(color.red, 60),
               textcolor=color.white,
-              size=size.tiny)
+              size=swing_label_size)
 
 // Mark swing lows
 if show_swing_points and not na(swing_low)
-    label.new(bar_index - swing_lookback, swing_low, "SL",
+    label.new(bar_index - effective_swing_lookback, swing_low, "SL",
               style=label.style_label_up,
               color=color.new(color.green, 60),
               textcolor=color.white,
-              size=size.tiny)
+              size=swing_label_size)
 
 // ============================================================================
 // EFFORT VS RESULT INDICATOR (Wyckoff Law #3)
