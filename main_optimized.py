@@ -9,7 +9,11 @@ from typing import Optional
 import base64
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP, Context, Image
-from tview_scraper import TradingViewScraper, TradingViewScraperError
+from tview_scraper import (
+    TradingViewScraper,
+    TradingViewScraperError,
+    TradingViewAuthenticationError,
+)
 
 
 def setup_logging(log_dir=None, log_level="INFO"):
@@ -255,6 +259,55 @@ class OptimizedTradingViewMCPServer:
             "max_concurrent": self.max_concurrent,
         }
 
+    async def check_session_health(self) -> dict:
+        """
+        Check the health of the TradingView session using a pooled browser.
+
+        Returns:
+            dict with session health information including:
+            - healthy: bool indicating overall health
+            - authenticated: bool indicating if session is authenticated
+            - cookies_present: bool indicating if cookies are configured
+            - message: human-readable status
+            - details: additional validation details
+        """
+        self.logger.info("🔍 Checking session health...")
+
+        async with self.semaphore:
+            scraper = None
+            try:
+                scraper = self._get_browser()
+                if not scraper:
+                    return {
+                        "healthy": False,
+                        "authenticated": False,
+                        "cookies_present": False,
+                        "message": "No browser available in pool",
+                        "details": {},
+                    }
+
+                # Run health check in executor since it involves browser operations
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None, scraper.check_session_health, True  # navigate_first=True
+                )
+
+                self.logger.info(f"Session health check result: {result}")
+                return result
+
+            except Exception as e:
+                self.logger.error(f"Session health check failed: {e}")
+                return {
+                    "healthy": False,
+                    "authenticated": False,
+                    "cookies_present": True,
+                    "message": f"Health check failed: {e}",
+                    "details": {},
+                }
+
+            finally:
+                if scraper:
+                    self._return_browser(scraper)
+
     def cleanup(self):
         """Clean up browser pool"""
         self.logger.info("🧹 Cleaning up browser pool...")
@@ -459,6 +512,60 @@ Expected Performance:
    • 1 request: ~6-8s
    • 2 concurrent: ~3-4s each (60-70% faster)
    • 3 concurrent: ~2.5-3.5s each (70-80% faster)
+"""
+    else:
+        return "⚠️ Optimized server not initialized (pooling may be disabled)"
+
+
+@mcp_server.tool()
+async def check_session_health(ctx: Context) -> str:
+    """
+    Check the health of the TradingView session.
+
+    This tool validates that:
+    - Session cookies are configured
+    - The session is authenticated (not expired)
+    - No sign-in prompts are visible
+
+    Use this to diagnose authentication issues or verify session validity
+    before making chart requests.
+
+    Returns:
+        A formatted string with session health status and details.
+    """
+    await ctx.info("🔍 Checking TradingView session health...")
+
+    if optimized_server:
+        result = await optimized_server.check_session_health()
+
+        status_emoji = "✅" if result.get("healthy") else "❌"
+        auth_emoji = "✅" if result.get("authenticated") else "❌"
+        cookies_emoji = "✅" if result.get("cookies_present") else "❌"
+
+        details = result.get("details", {})
+        details_str = ""
+        if details:
+            details_str = f"""
+📋 Validation Details:
+   • Sign-in button detected: {"Yes" if details.get("has_sign_in_button") else "No"}
+   • User menu detected: {"Yes" if details.get("has_user_menu") else "No"}
+   • Subscription warning: {"Yes" if details.get("has_subscription_warning") else "No"}
+"""
+
+        return f"""
+🏥 TRADINGVIEW SESSION HEALTH CHECK
+===================================
+
+{status_emoji} Overall Health: {"Healthy" if result.get("healthy") else "Unhealthy"}
+{auth_emoji} Authenticated: {"Yes" if result.get("authenticated") else "No"}
+{cookies_emoji} Cookies Present: {"Yes" if result.get("cookies_present") else "No"}
+
+💬 Status: {result.get("message", "Unknown")}
+{details_str}
+🔧 Troubleshooting:
+   • If not authenticated, refresh your TradingView session cookies
+   • Set TRADINGVIEW_SESSION_ID and TRADINGVIEW_SESSION_ID_SIGN environment variables
+   • Cookies can be found in browser DevTools > Application > Cookies
 """
     else:
         return "⚠️ Optimized server not initialized (pooling may be disabled)"

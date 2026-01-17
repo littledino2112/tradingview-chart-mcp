@@ -53,6 +53,14 @@ class TradingViewServerError(TradingViewScraperError):
         self.response_data = response_data
 
 
+class TradingViewAuthenticationError(TradingViewScraperError):
+    """Exception for authentication failures (expired/invalid session cookies)."""
+
+    def __init__(self, message, details=None):
+        super().__init__(message)
+        self.details = details or {}
+
+
 class TradingViewScraper:
     """
     A scraper for capturing TradingView chart screenshot links using Selenium.
@@ -84,6 +92,25 @@ class TradingViewScraper:
     ASYNC_SCRIPT_TIMEOUT = (
         10  # Reduced timeout for async clipboard operations (reduced from 15s)
     )
+
+    # Authentication detection selectors
+    SIGN_IN_SELECTORS = [
+        "[data-name='header-user-menu-sign-in']",
+        ".tv-header__user-menu-button--login",
+        "[class*='signin']",
+        "[class*='sign-in']",
+        "a[href*='/signin']",
+    ]
+    AUTHENTICATED_USER_SELECTORS = [
+        "[data-name='header-user-menu-button']",
+        ".tv-header__user-menu-button--logged",
+        "[class*='user-menu']",
+    ]
+    SUBSCRIPTION_WARNING_SELECTORS = [
+        "[class*='upgrade']",
+        "[class*='subscribe']",
+        "[data-name='go-pro-button']",
+    ]
 
     def __init__(
         self,
@@ -369,6 +396,115 @@ class TradingViewScraper:
         except (WebDriverException, TimeoutException) as e:
             self.logger.error("Error setting cookies: %s", e)
             return False
+
+    def _validate_authentication(self, raise_on_failure: bool = False) -> dict:
+        """
+        Validates that the current session is authenticated.
+
+        Checks for signs of authentication failure such as:
+        - Presence of "Sign In" buttons
+        - Absence of user menu (authenticated user indicator)
+        - Subscription/upgrade warnings that indicate limited access
+
+        Args:
+            raise_on_failure: If True, raises TradingViewAuthenticationError on auth failure.
+
+        Returns:
+            dict with keys:
+                - authenticated (bool): Whether session appears authenticated
+                - has_sign_in_button (bool): Whether sign-in button was found
+                - has_user_menu (bool): Whether user menu was found
+                - has_subscription_warning (bool): Whether upgrade prompts were found
+                - message (str): Human-readable status message
+        """
+        if not self.driver:
+            result = {
+                "authenticated": False,
+                "has_sign_in_button": False,
+                "has_user_menu": False,
+                "has_subscription_warning": False,
+                "message": "Driver not initialized",
+            }
+            if raise_on_failure:
+                raise TradingViewAuthenticationError(result["message"], result)
+            return result
+
+        self.logger.info("Validating authentication status...")
+
+        has_sign_in_button = False
+        has_user_menu = False
+        has_subscription_warning = False
+
+        try:
+            # Check for sign-in buttons (indicates NOT authenticated)
+            for selector in self.SIGN_IN_SELECTORS:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if elements and any(el.is_displayed() for el in elements):
+                        has_sign_in_button = True
+                        self.logger.warning(
+                            "Found sign-in button with selector: %s", selector
+                        )
+                        break
+                except Exception:
+                    continue
+
+            # Check for authenticated user menu (indicates authenticated)
+            for selector in self.AUTHENTICATED_USER_SELECTORS:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if elements and any(el.is_displayed() for el in elements):
+                        has_user_menu = True
+                        self.logger.info(
+                            "Found user menu with selector: %s", selector
+                        )
+                        break
+                except Exception:
+                    continue
+
+            # Check for subscription warnings (may indicate limited access)
+            for selector in self.SUBSCRIPTION_WARNING_SELECTORS:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if elements and any(el.is_displayed() for el in elements):
+                        has_subscription_warning = True
+                        self.logger.info(
+                            "Found subscription warning with selector: %s", selector
+                        )
+                        break
+                except Exception:
+                    continue
+
+        except WebDriverException as e:
+            self.logger.warning("Error during authentication validation: %s", e)
+
+        # Determine authentication status
+        # Authenticated if: user menu present OR no sign-in button visible
+        # Note: subscription warnings alone don't mean unauthenticated
+        authenticated = has_user_menu or (not has_sign_in_button)
+
+        if authenticated:
+            if has_subscription_warning:
+                message = "Authenticated but subscription warnings present (limited features may apply)"
+            else:
+                message = "Session authenticated successfully"
+        else:
+            message = "Session not authenticated - sign-in button detected"
+
+        result = {
+            "authenticated": authenticated,
+            "has_sign_in_button": has_sign_in_button,
+            "has_user_menu": has_user_menu,
+            "has_subscription_warning": has_subscription_warning,
+            "message": message,
+        }
+
+        self.logger.info("Authentication validation result: %s", result)
+
+        if raise_on_failure and not authenticated:
+            raise TradingViewAuthenticationError(message, result)
+
+        return result
 
     def _wait_for_chart_infrastructure(self):
         """Wait for essential chart elements with parallel detection."""
@@ -1024,6 +1160,14 @@ class TradingViewScraper:
                 f"{self.TRADINGVIEW_CHART_BASE_URL}{self.config['chart_page_id']}/?symbol={ticker}&interval={interval}"
             )
 
+            # Validate authentication after page load
+            auth_result = self._validate_authentication(raise_on_failure=False)
+            if not auth_result["authenticated"]:
+                self.logger.warning(
+                    "Authentication validation failed: %s", auth_result["message"]
+                )
+                # Log but don't fail - user might still get public chart data
+
             # Clear browser clipboard before reading
             self.logger.info("Attempting to clear browser clipboard before reading...")
             try:
@@ -1158,6 +1302,94 @@ class TradingViewScraper:
             method_logger.debug("No TradingView share links found to convert.")
 
         return output_string
+
+    def check_session_health(self, navigate_first: bool = True) -> dict:
+        """
+        Public API to check if the TradingView session is healthy and authenticated.
+
+        This method can be used for:
+        - Startup validation before processing requests
+        - Periodic health checks in long-running deployments
+        - Diagnosing authentication issues
+
+        Args:
+            navigate_first: If True, navigates to TradingView chart page before checking.
+                           Set to False if already on a TradingView page.
+
+        Returns:
+            dict with keys:
+                - healthy (bool): Overall health status
+                - authenticated (bool): Whether session is authenticated
+                - cookies_present (bool): Whether session cookies are configured
+                - message (str): Human-readable status message
+                - details (dict): Detailed validation results
+        """
+        self.logger.info("Performing session health check...")
+
+        # Check if cookies are configured
+        session_id = os.getenv(self.SESSION_ID_ENV_VAR)
+        session_sign = os.getenv(self.SESSION_ID_SIGN_ENV_VAR)
+        cookies_present = bool(session_id and session_sign)
+
+        if not cookies_present:
+            return {
+                "healthy": False,
+                "authenticated": False,
+                "cookies_present": False,
+                "message": f"Session cookies not configured. Set {self.SESSION_ID_ENV_VAR} and {self.SESSION_ID_SIGN_ENV_VAR}",
+                "details": {},
+            }
+
+        if not self.driver:
+            return {
+                "healthy": False,
+                "authenticated": False,
+                "cookies_present": cookies_present,
+                "message": "WebDriver not initialized",
+                "details": {},
+            }
+
+        try:
+            if navigate_first:
+                # Navigate to a chart page to test authentication
+                test_url = f"{self.TRADINGVIEW_CHART_BASE_URL}{self.config['chart_page_id']}/"
+                self.logger.info("Navigating to %s for health check...", test_url)
+                self._set_auth_cookies_optimized(test_url)
+
+                # Wait briefly for page to stabilize
+                self._wait_for_chart_infrastructure()
+
+            # Validate authentication
+            auth_result = self._validate_authentication(raise_on_failure=False)
+
+            healthy = auth_result["authenticated"]
+            message = auth_result["message"]
+
+            return {
+                "healthy": healthy,
+                "authenticated": auth_result["authenticated"],
+                "cookies_present": cookies_present,
+                "message": message,
+                "details": auth_result,
+            }
+
+        except TradingViewScraperError as e:
+            return {
+                "healthy": False,
+                "authenticated": False,
+                "cookies_present": cookies_present,
+                "message": f"Health check failed: {e}",
+                "details": {},
+            }
+        except Exception as e:
+            self.logger.error("Unexpected error during health check: %s", e)
+            return {
+                "healthy": False,
+                "authenticated": False,
+                "cookies_present": cookies_present,
+                "message": f"Health check error: {e}",
+                "details": {},
+            }
 
     def close(self):
         """Safely quits the WebDriver."""
